@@ -8,7 +8,19 @@
 
 #define SD_CS 5 
 
-char** prg;
+
+struct prgInfo_t {
+  char* name;
+  int tickrate;
+  char* fillColor;
+  char* backgroundColor;
+  char* buzzColor;
+  char* quietColor;
+  bool shiftQuirks;
+  bool loadStoreQuirks;
+};
+
+prgInfo_t* prg;
 int prgCount = 0;
 int prgSpace = 0;
 int currPrg = 52; // octojam1title.ch8
@@ -122,7 +134,6 @@ CST820 touch(I2C_SDA, I2C_SCL, TP_RST, TP_INT);
 
 const int WIDTH = 320;
 const int HEIGHT = 240;
-const int scale = 3;
 
 #if defined ( SDL_h_ )
 static LGFX lcd(WIDTH, HEIGHT, 2);
@@ -135,7 +146,7 @@ static char lbl[20][2] = {
   "1", "2", "3", "C", "<",
   "4", "5", "6", "D", ">",
   "7", "8", "9", "E", "G",
-  "A", "0", "B", "F", "S",
+  "A", "0", "B", "F", "M",
 };
 
 static LGFX_Button btn[20];
@@ -160,7 +171,7 @@ const std::int8_t KEY_NONE = -1;
 const std::int8_t KEY_LEFT = -2;
 const std::int8_t KEY_RIGHT = -3;
 const std::int8_t KEY_GO = -4;
-const std::int8_t KEY_STOP = -5;
+const std::int8_t KEY_MONITOR = -5;
 
 std::int8_t hexButton(std::uint8_t i) {
   char c = lbl[i][0];
@@ -170,7 +181,7 @@ std::int8_t hexButton(std::uint8_t i) {
   }
   else
   if (c >= 'A' && c <= 'F') {
-    return c - 'A';
+    return c - 'A' + 0xA;
   }
   else
   if (c == '<') return KEY_LEFT;
@@ -179,7 +190,7 @@ std::int8_t hexButton(std::uint8_t i) {
   else
   if (c == 'G') return KEY_GO;
   else
-  if (c == 'S') return KEY_STOP;
+  if (c == 'M') return KEY_MONITOR;
   else return KEY_NONE;
 }
 
@@ -212,8 +223,13 @@ void drawButtons(void) {
 void showCurrPrg() {
   lcd.fillRect(0, 124, 240, 22, 0xFFFF6600u);
   lcd.setTextColor(0xFFFFCC00u);
-  //lcd.setTextFont(4);
-  lcd.drawString(prg[currPrg], 20, 124);
+
+  char* shortName = strdup(prg[currPrg]);
+  if (char* dot = strchr(shortName, '.')) {
+    *dot = '\0';
+  }
+  lcd.drawString(shortName, 20, 124);
+  free(shortName);
 }
 
 void loadCurrPrg() {
@@ -235,6 +251,47 @@ void loadCurrPrg() {
   octo_emulator_init(&emu, ch8, ch8Size, &defaults, NULL);
 }
 
+void loadPrgInfo(void) {
+  File f = SD.open("/chip8.txt");
+  if (!f) {
+    console_printf("Can't read info\r\n");
+    return;
+  }
+  int size = f.size();
+  char* info = (char*)malloc(size);
+  f.read((uint8_t*)info, size);
+  f.close();
+
+  prg = (char**)malloc(20 * sizeof(char*));
+  prgSpace = 20;
+
+  int i = 0;
+  while (i < size) {
+    prgInfo_t prgInfo;
+
+    prgInfo.name = strtok(info[i], ",");
+    prgInfo.tickrate = atoi(strtok(NULL, ","));
+    prgInfo.fillColor = strtok(NULL, ",");
+    prgInfo.backgroundColor = strtok(NULL, ",");
+    prgInfo.buzzColor = strtok(NULL, ",");
+    prgInfo.quietColor = strtok(NULL, ",");
+    char* s = strtok(NULL, ",")
+    prgInfo.shiftQuirks = s[0] == 1;
+    char* s = strtok(NULL, "\n")
+    prgInfo.loadStoreQuirks = s[0] == 1;
+
+    if (prgSpace < ++prgCount) {
+      prgSpace += 20;
+      console_printf("cnt=%d. More space -> %d\r\n", prgCount, prgSpace);
+      prg = (char**)realloc(prg, prgSpace * sizeof(char*));
+    }
+    prg[prgCount - 1] = strdup(entry.name());
+    entry.close();
+  }
+  root.close();
+  console_printf("%d files read.\r\n", prgCount);
+}
+
 void setup(void)
 {
   Serial.begin(115200);
@@ -244,6 +301,9 @@ void setup(void)
     while (1) delay(0);
   }
 
+  loadPrgInfo();
+
+#if 0
   prg = (char**)malloc(20 * sizeof(char*));
   prgSpace = 20;
 
@@ -263,6 +323,7 @@ void setup(void)
   }
   root.close();
   console_printf("%d files read.\r\n", prgCount);
+#endif
 
   lcd.init();
   lcd.setRotation(2);
@@ -276,20 +337,8 @@ void setup(void)
 
   octo_default_options(&defaults);
   loadCurrPrg();
-  int w = emu.hires ? 128 : 64, h = emu.hires ? 64 : 32;
-
-  sprite.createSprite(w, h);
-  sprite.setPivot(w / 2, h / 2);
-  sprite.setColorDepth(4);
-  sprite.setPaletteColor(1, 0xFFFFCC00u);
-  sprite.setPaletteColor(2, 0xFFFF6600u);
-  sprite.setPaletteColor(3, 0xFF662200u);
-
-  drawButtons();
-
   showCurrPrg();
-
-  console_printf("After drawButtons: w=%d, h=%d\r\n", w, h);
+  drawButtons();
 }
 
 void ui_run(octo_emulator* emu) {
@@ -301,7 +350,21 @@ void ui_run(octo_emulator* emu) {
 
   // render chip8 display
   int w = emu->hires ? 128 : 64, h = emu->hires ? 64 : 32;
-  //console_printf("draw rot=%d w=%d h=%d\n", emu->options.rotation, w, h);
+  float scale = emu->hires ? 1.5 : 3;
+
+  static char lastRes = emu->hires;
+  if (emu->hires != lastRes) {
+    lastRes = emu->hires;
+    lcd.fillCircle(10, 10, 4, emu->hires ? 0xFFFF6600u : 0xFF996600u);
+    console_printf("%sres rot=%d w=%d h=%d scale=%f\r\n", emu->hires ? "hi" : "lo", emu->options.rotation, w, h, scale);
+  }
+
+  sprite.createSprite(w, h);
+  sprite.setPivot(w / 2, h / 2);
+  sprite.setColorDepth(4);
+  sprite.setPaletteColor(1, 0xFFFFCC00u);
+  sprite.setPaletteColor(2, 0xFFFF6600u);
+  sprite.setPaletteColor(3, 0xFF662200u);
 
   for(int y=0; y<h; y++) {
     for(int x=0; x<w; x++) {
@@ -311,7 +374,8 @@ void ui_run(octo_emulator* emu) {
     }
     //console_printf("\n");
   }
-  sprite.pushRotateZoom(lcd.width() / 2, h * 2, 0, scale, scale);
+  sprite.pushRotateZoom(lcd.width() / 2, 64, 0, scale, scale);
+  sprite.deleteSprite();
 }
 
 void emu_step(octo_emulator* emu) {
@@ -374,7 +438,7 @@ void loop(void)
 #endif
 
           std::int8_t b = hexButton(i);
-          console_printf("btn %d\r\n", b);
+          //console_printf("btn %d\r\n", b);
 
           if (btn[i].justPressed()) {
             if (lbl[i][0] == '<' && currPrg > 0) {
