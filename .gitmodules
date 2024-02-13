@@ -1,0 +1,3 @@
+[submodule "fs/chip8Archive"]
+	path = fs/chip8Archive
+	url = https://github.com/JohnEarnest/chip8Archive

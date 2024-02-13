@@ -1,3 +1,21 @@
+/**
+ * Play CHIP-8 ROMs on an esp32-2432s024c
+ */ 
+#include <string.h>
+
+#include <SPI.h>
+#include <SD.h>
+
+#define SD_CS 5 
+
+char** prg;
+int prgCount = 0;
+int prgSpace = 0;
+int currPrg = 52; // octojam1title.ch8
+
+char* ch8 = NULL;
+int ch8Size;
+
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
 #include <lgfx/v1/LGFX_Button.hpp>
@@ -166,7 +184,6 @@ std::int8_t hexButton(std::uint8_t i) {
 }
 
 void drawButtons(void) {
-  lcd.setFont(&fonts::FreeMonoBold24pt7b);
   for (int col = 0; col <= 4; col++) {
     for (int row = 0; row <= 3; row++) {
       //lcd.drawRect(40 + col * 42, 140 + row * 42, 40, 40, 0xFFFFCC00u);
@@ -176,7 +193,7 @@ void drawButtons(void) {
 
       btn[n].initButton(&lcd,
         34 + col * 42,      // x
-        160 + row * 42,     // y
+        170 + row * 42,     // y
         30,                 // w
         30,                 // h
         0xFFFFCC00u,        // outline
@@ -184,17 +201,69 @@ void drawButtons(void) {
         col == 4 ? 0xFFFF6600u : 0xFFFFCC00u,
                             // textcolor
         lbl[n],             // label
-        0.5,                // textsize x
-        0.5                 // textsize y
+        1.0,                // textsize x
+        1.0                 // textsize y
       );
       btn[n].drawButton();
     }
   }
 }
 
+void showCurrPrg() {
+  lcd.fillRect(0, 124, 240, 22, 0xFFFF6600u);
+  lcd.setTextColor(0xFFFFCC00u);
+  //lcd.setTextFont(4);
+  lcd.drawString(prg[currPrg], 20, 124);
+}
+
+void loadCurrPrg() {
+  char* path = (char*) malloc(8 + strlen(prg[currPrg]));
+  strcpy(path, "/chip8/");
+  strcat(path, prg[currPrg]);
+  File f = SD.open(path);
+  ch8Size = f.size();
+  if (ch8) {
+    ch8 = (char*)realloc(ch8, ch8Size);
+  }
+  else {
+    ch8 = (char*)malloc(ch8Size);
+  }
+  f.read((uint8_t*)ch8, ch8Size);
+  f.close();
+  free(path);
+
+  octo_emulator_init(&emu, ch8, ch8Size, &defaults, NULL);
+}
+
 void setup(void)
 {
   Serial.begin(115200);
+
+  if (!SD.begin(SD_CS)) {
+    console_printf("SD.begin failed!\r\n");
+    while (1) delay(0);
+  }
+
+  prg = (char**)malloc(20 * sizeof(char*));
+  prgSpace = 20;
+
+  File root = SD.open("/chip8");
+  while (1) {
+    File entry = root.openNextFile();
+    if (!entry) {
+      break;
+    }
+    if (prgSpace < ++prgCount) {
+      prgSpace += 20;
+      console_printf("cnt=%d. More space -> %d\r\n", prgCount, prgSpace);
+      prg = (char**)realloc(prg, prgSpace * sizeof(char*));
+    }
+    prg[prgCount - 1] = strdup(entry.name());
+    entry.close();
+  }
+  root.close();
+  console_printf("%d files read.\r\n", prgCount);
+
   lcd.init();
   lcd.setRotation(2);
 
@@ -203,9 +272,10 @@ void setup(void)
 //  lcd.setBrightness(128);
   lcd.setColorDepth(16);
   lcd.fillScreen(0xFF996600u);
+  lcd.setFont(&fonts::FreeMonoBold12pt7b);
 
   octo_default_options(&defaults);
-  octo_emulator_init(&emu, (char*)invaders, sizeof(invaders), &defaults, NULL);
+  loadCurrPrg();
   int w = emu.hires ? 128 : 64, h = emu.hires ? 64 : 32;
 
   sprite.createSprite(w, h);
@@ -217,7 +287,9 @@ void setup(void)
 
   drawButtons();
 
-  console_printf("After drawButtons: w=%d, h=%d\n", w, h);
+  showCurrPrg();
+
+  console_printf("After drawButtons: w=%d, h=%d\r\n", w, h);
 }
 
 void ui_run(octo_emulator* emu) {
@@ -285,6 +357,7 @@ void loop(void)
           btn[i].press(true);
           btn[i].drawButton(true);
 
+#if 0
           btnFlag.initButton(&lcd,
             220,                // x
             130,                // y
@@ -298,9 +371,27 @@ void loop(void)
             0.5                 // textsize y
           );
           btnFlag.drawButton();
+#endif
 
           std::int8_t b = hexButton(i);
           console_printf("btn %d\r\n", b);
+
+          if (btn[i].justPressed()) {
+            if (lbl[i][0] == '<' && currPrg > 0) {
+              currPrg -= 1;
+              showCurrPrg();
+            }
+            else
+            if (lbl[i][0] == '>' && currPrg < prgCount - 1) {
+              currPrg += 1;
+              showCurrPrg();
+            }
+            else
+            if (lbl[i][0] == 'G' ) {
+              loadCurrPrg();
+            }
+          }
+
           emu.keys[b] = true;
         }
       }
@@ -312,7 +403,9 @@ void loop(void)
           btn[i].drawButton(false);
           emu.keys[hexButton(i)] = false;
 
+#if 0
           lcd.fillRect(200, 110, 35, 35, 0xFF996600u);
+#endif
         }
       }
     }
