@@ -21,6 +21,7 @@ console_printf(const char* fmt, ...) {
   vsnprintf(buf, sizeof(buf), fmt, args);
   Serial.print(buf);
   va_end(args);
+  Serial.flush();
 }
 
 #endif

@@ -23,10 +23,14 @@ struct prgInfo_t {
 prgInfo_t* prg;
 int prgCount = 0;
 int prgSpace = 0;
-int currPrg = 52; // octojam1title.ch8
+int currPrg = 55; // octojam1title.ch8
 
 char* ch8 = NULL;
 int ch8Size;
+
+bool isMonitor = false;
+uint16_t monitorAddr;
+uint8_t monitorNibble;
 
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
@@ -128,8 +132,6 @@ public:
 CST820 touch(I2C_SDA, I2C_SCL, TP_RST, TP_INT);
 
 #include "console.h"
-
-#include "invaders.h"
 #include "octo_emulator.h"
 
 const int WIDTH = 320;
@@ -164,7 +166,7 @@ unsigned long millis() {
 #endif
 
 octo_emulator emu;
-octo_options defaults;
+octo_options options;
 
 const std::int8_t KEY_NONE = -1;
 
@@ -197,16 +199,13 @@ std::int8_t hexButton(std::uint8_t i) {
 void drawButtons(void) {
   for (int col = 0; col <= 4; col++) {
     for (int row = 0; row <= 3; row++) {
-      //lcd.drawRect(40 + col * 42, 140 + row * 42, 40, 40, 0xFFFFCC00u);
-      //lcd.drawString(btn[4 * row + col], 40 + col * 42 + 18, 140 + row * 42 + 12, 0xFFFFCC00u);
-
       int n = 5 * row + col;
 
       btn[n].initButton(&lcd,
-        34 + col * 42,      // x
-        170 + row * 42,     // y
-        30,                 // w
-        30,                 // h
+        36 + col * 42,      // x
+        150 + row * 42,     // y
+        36,                 // w
+        36,                 // h
         0xFFFFCC00u,        // outline
         0xFF996600u,        // fill
         col == 4 ? 0xFFFF6600u : 0xFFFFCC00u,
@@ -221,21 +220,19 @@ void drawButtons(void) {
 }
 
 void showCurrPrg() {
-  lcd.fillRect(0, 124, 240, 22, 0xFFFF6600u);
-  lcd.setTextColor(0xFFFFCC00u);
+  lcd.fillRect(0, 0, 240, 18, 0xFFFFCC00u);
 
-  char* shortName = strdup(prg[currPrg]);
-  if (char* dot = strchr(shortName, '.')) {
-    *dot = '\0';
-  }
-  lcd.drawString(shortName, 20, 124);
-  free(shortName);
+  lcd.setTextColor(0xFF996600u, 0xFFFFCC00u);
+  lcd.drawNumber(options.tickrate, 2, 0, &fonts::FreeMonoBold9pt7b);
+  lcd.drawCenterString(prg[currPrg].name, 120, 0, &fonts::FreeMonoBold9pt7b);
+  lcd.setTextColor(0xFFFFCC00u, 0xFF996600u);
 }
 
 void loadCurrPrg() {
-  char* path = (char*) malloc(8 + strlen(prg[currPrg]));
+  char* path = (char*) malloc(12 + strlen(prg[currPrg].name));
   strcpy(path, "/chip8/");
-  strcat(path, prg[currPrg]);
+  strcat(path, prg[currPrg].name);
+  strcat(path, ".ch8");
   File f = SD.open(path);
   ch8Size = f.size();
   if (ch8) {
@@ -248,7 +245,16 @@ void loadCurrPrg() {
   f.close();
   free(path);
 
-  octo_emulator_init(&emu, ch8, ch8Size, &defaults, NULL);
+  octo_default_options(&options);
+  options.tickrate = prg[currPrg].tickrate;
+  options.q_shift = prg[currPrg].shiftQuirks;
+  options.q_loadstore = prg[currPrg].loadStoreQuirks;
+  octo_emulator_init(&emu, ch8, ch8Size, &options, NULL);
+
+  monitorAddr = 0x200;
+  monitorNibble = 0;
+
+  showCurrPrg();
 }
 
 void loadPrgInfo(void) {
@@ -258,37 +264,40 @@ void loadPrgInfo(void) {
     return;
   }
   int size = f.size();
-  char* info = (char*)malloc(size);
+  char* info = (char*)malloc(size + 1);
   f.read((uint8_t*)info, size);
   f.close();
+  info[size] = '\0';
 
-  prg = (char**)malloc(20 * sizeof(char*));
-  prgSpace = 20;
+  prg = (prgInfo_t*)malloc(30 * sizeof(prgInfo_t));
+  prgSpace = 30;
 
-  int i = 0;
-  while (i < size) {
+  while (true) {
     prgInfo_t prgInfo;
 
-    prgInfo.name = strtok(info[i], ",");
+    prgInfo.name = strtok(info, ",");
+    info = NULL;
+    if (!prgInfo.name) {
+      break;
+    }
     prgInfo.tickrate = atoi(strtok(NULL, ","));
     prgInfo.fillColor = strtok(NULL, ",");
     prgInfo.backgroundColor = strtok(NULL, ",");
     prgInfo.buzzColor = strtok(NULL, ",");
     prgInfo.quietColor = strtok(NULL, ",");
-    char* s = strtok(NULL, ",")
+    char* s = strtok(NULL, ",");
     prgInfo.shiftQuirks = s[0] == 1;
-    char* s = strtok(NULL, "\n")
+    s = strtok(NULL, "\n");
     prgInfo.loadStoreQuirks = s[0] == 1;
 
     if (prgSpace < ++prgCount) {
-      prgSpace += 20;
-      console_printf("cnt=%d. More space -> %d\r\n", prgCount, prgSpace);
-      prg = (char**)realloc(prg, prgSpace * sizeof(char*));
+      prgSpace += 30;
+      //console_printf("cnt=%d. More space -> %d\r\n", prgCount, prgSpace);
+      prg = (prgInfo_t*)realloc(prg, prgSpace * sizeof(prgInfo_t));
     }
-    prg[prgCount - 1] = strdup(entry.name());
-    entry.close();
+    //console_printf("%d: %s\r\n", prgCount -1, prgInfo.name);
+    memcpy(&prg[prgCount - 1], &prgInfo, sizeof(prgInfo_t));
   }
-  root.close();
   console_printf("%d files read.\r\n", prgCount);
 }
 
@@ -303,28 +312,6 @@ void setup(void)
 
   loadPrgInfo();
 
-#if 0
-  prg = (char**)malloc(20 * sizeof(char*));
-  prgSpace = 20;
-
-  File root = SD.open("/chip8");
-  while (1) {
-    File entry = root.openNextFile();
-    if (!entry) {
-      break;
-    }
-    if (prgSpace < ++prgCount) {
-      prgSpace += 20;
-      console_printf("cnt=%d. More space -> %d\r\n", prgCount, prgSpace);
-      prg = (char**)realloc(prg, prgSpace * sizeof(char*));
-    }
-    prg[prgCount - 1] = strdup(entry.name());
-    entry.close();
-  }
-  root.close();
-  console_printf("%d files read.\r\n", prgCount);
-#endif
-
   lcd.init();
   lcd.setRotation(2);
 
@@ -335,9 +322,7 @@ void setup(void)
   lcd.fillScreen(0xFF996600u);
   lcd.setFont(&fonts::FreeMonoBold12pt7b);
 
-  octo_default_options(&defaults);
   loadCurrPrg();
-  showCurrPrg();
   drawButtons();
 }
 
@@ -355,12 +340,12 @@ void ui_run(octo_emulator* emu) {
   static char lastRes = emu->hires;
   if (emu->hires != lastRes) {
     lastRes = emu->hires;
-    lcd.fillCircle(10, 10, 4, emu->hires ? 0xFFFF6600u : 0xFF996600u);
+    lcd.fillCircle(10, 32, 4, emu->hires ? 0xFFFF6600u : 0xFF996600u);
     console_printf("%sres rot=%d w=%d h=%d scale=%f\r\n", emu->hires ? "hi" : "lo", emu->options.rotation, w, h, scale);
   }
 
   sprite.createSprite(w, h);
-  sprite.setPivot(w / 2, h / 2);
+  sprite.setPivot(w / 2, 0);
   sprite.setColorDepth(4);
   sprite.setPaletteColor(1, 0xFFFFCC00u);
   sprite.setPaletteColor(2, 0xFFFF6600u);
@@ -374,7 +359,7 @@ void ui_run(octo_emulator* emu) {
     }
     //console_printf("\n");
   }
-  sprite.pushRotateZoom(lcd.width() / 2, 64, 0, scale, scale);
+  sprite.pushRotateZoom(lcd.width() / 2, 74, 0, scale, scale);
   sprite.deleteSprite();
 }
 
@@ -396,6 +381,188 @@ void emu_step(octo_emulator* emu) {
   }
   if (emu->dt>0) emu->dt--;
   if (emu->st>0) emu->st--, emu->had_sound=1;
+}
+
+char* instr(octo_emulator* emu, uint16_t addr) {
+  uint8_t hi = emu->ram[addr], lo = emu->ram[addr+1], op = hi >> 4;  
+  uint16_t wd = hi;
+  wd <<= 8; wd |= lo;
+  static char buf[13]; 
+  switch (op) {
+    case 0x0:
+      switch (wd) {
+        case 0x00E0:
+          return "cls";
+        case 0x00EE:
+          return "ret";
+        case 0x00FF:
+          return "hires";
+        case 0x00FE:
+          return "lores";
+        case 0x00FD:
+          return "exit";
+        case 0x00FB:
+          return "scr";
+        case 0x00FC:
+          return "scl";
+        default:
+          if (lo & 0xF0 == 0xC0) {
+            snprintf(buf, 8, "scd d %X", lo & 0x0F);
+          }
+          else {
+            snprintf(buf, 5, "%04X", wd);
+          }
+          return buf;
+      }
+      break;
+    case 0x1:
+      snprintf(buf, 7, "jp %03X", wd & 0xFFF);
+      return buf;
+    case 0x2:
+      snprintf(buf, 9, "call %03X", wd & 0xFFF);
+      return buf;
+    case 0x3:
+      snprintf(buf, 9, "se v%X,%02X", hi & 0xF, lo);
+      return buf;
+    case 0x4:
+      snprintf(buf, 10, "sne v%X,%02X", hi & 0xF, lo);
+      return buf;
+    case 0x5:
+      snprintf(buf, 9, "se v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
+      return buf;
+    case 0x6:
+      snprintf(buf, 9, "ld v%X,%02X", hi & 0xF, lo);
+      return buf;
+    case 0x7:
+      snprintf(buf, 10, "add v%X,%02X", hi & 0xF, lo);
+      return buf;
+    case 0x8:
+      switch (lo & 0xF) {
+        case 0x0:
+          snprintf(buf, 9, "ld v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
+          return buf;
+        case 0x1:
+          snprintf(buf, 9, "or v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
+          return buf;
+        case 0x2:
+          snprintf(buf, 10, "and v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
+          return buf;
+        case 0x3:
+          snprintf(buf, 10, "xor v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
+          return buf;
+        case 0x4:
+          snprintf(buf, 10, "add v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
+          return buf;
+        case 0x5:
+          snprintf(buf, 10, "sub v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
+          return buf;
+        case 0x6:
+          snprintf(buf, 10, "shr v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
+          return buf;
+        case 0x7:
+          snprintf(buf, 11, "subn v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
+          return buf;
+        case 0xE:
+          snprintf(buf, 10, "shl v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
+          return buf;
+        default: 
+          snprintf(buf, 5, "%04X", wd);
+          return buf;
+      }
+    case 0x9:
+      snprintf(buf, 10, "sne v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
+      return buf;
+    case 0xa:
+      snprintf(buf, 9, "ld i %03X", wd & 0xFFF);
+      return buf;
+    case 0xb:
+      snprintf(buf, 9, "jp v0,%03X", wd & 0xFFF);
+      return buf;
+    case 0xc:
+      snprintf(buf, 9, "rnd v%X,%02X", hi & 0xF, lo);
+      return buf;
+    case 0xd:
+      snprintf(buf, 12, "drw v%X,v%X,%X", hi & 0xF, lo >> 4, lo & 0xF);
+      return buf;
+    case 0xe:
+      switch (lo) {
+        case 0x9E:
+          snprintf(buf, 7, "skp v%X", hi & 0xF);
+          return buf;
+        case 0xA1:
+          snprintf(buf, 7, "sknp v%X", hi & 0xF);
+          return buf;
+        default: 
+          snprintf(buf, 5, "%04X", wd);
+          return buf;
+      }
+    case 0xf:
+      switch (lo) {
+        case 0x07:
+          snprintf(buf, 9, "ld v%X,dt", hi & 0xF);
+          return buf;
+        case 0x0A:
+          snprintf(buf, 8, "ld v%X,k", hi & 0xF);
+          return buf;
+        case 0x15:
+          snprintf(buf, 9, "ld dt,v%X", hi & 0xF);
+          return buf;
+        case 0x18:
+          snprintf(buf, 9, "ld st,v%X", hi & 0xF);
+          return buf;
+        case 0x1E:
+          snprintf(buf, 9, "add i,v%X", hi & 0xF);
+          return buf;
+        case 0x29:
+          snprintf(buf, 8, "ld f,v%X", hi & 0xF);
+          return buf;
+        case 0x33:
+          snprintf(buf, 8, "ld b,v%X", hi & 0xF);
+          return buf;
+        case 0x55:
+          snprintf(buf, 10, "ld [i],v%X", hi & 0xF);
+          return buf;
+        case 0x65:
+          snprintf(buf, 10, "ld v%X,[i]", hi & 0xF);
+          return buf;
+        default: 
+          snprintf(buf, 5, "%04X", wd);
+          return buf;
+      }
+    default: 
+      snprintf(buf, 5, "%04X", wd);
+      return buf;
+  }
+}
+
+void showMonitor(octo_emulator* emu) {
+  console_printf("Monitor\r\n");
+
+  lcd.fillRect(0, 20, 240, 108, 0xFF996600u);
+
+  uint16_t addr = monitorAddr - 2;
+
+  char buf[25];
+  for (int i = 0; i < 5; i++) {
+    snprintf(buf, 24, "%04X:       %s", addr, instr(emu, addr));
+    lcd.drawString(buf, 20, 24 + i*20, &fonts::AsciiFont8x16);
+
+    snprintf(buf, 5, "%02X%02X", emu->ram[addr], emu->ram[addr+1]);
+    char c[2];
+    c[1] = '\0';
+    for (int n = 0; n < 4; n++) {
+      if (i == 1 && n == monitorNibble) {
+        lcd.setTextColor(0xFF996600u, 0xFFFFCC00u);
+      }
+      else {
+        lcd.setTextColor(0xFFFFCC00u, 0xFF996600u);
+      }
+      c[0] = buf[n];
+      lcd.drawString(c, 20 + 48 + n*8, 24 + i*20, &fonts::AsciiFont8x16);
+      lcd.setTextColor(0xFFFFCC00u, 0xFF996600u);
+    }
+    addr += 2;
+  }
 }
 
 unsigned long previousMillis = 0; // will store last time the function was called
@@ -421,61 +588,119 @@ void loop(void)
           btn[i].press(true);
           btn[i].drawButton(true);
 
-#if 0
-          btnFlag.initButton(&lcd,
-            220,                // x
-            130,                // y
-            30,                 // w
-            30,                 // h
-            0xFFFFCC00u,        // outline
-            0xFF996600u,        // fill
-            0xFFFFCC00u,        // textcolor
-            lbl[i],             // label
-            0.5,                // textsize x
-            0.5                 // textsize y
-          );
-          btnFlag.drawButton();
-#endif
+          //lcd.fillRect(218, 0, 22, 14, 0xFF996600u);
+          //lcd.setTextColor(0xFFFFCC00u);
+          //lcd.drawString(lbl[i], 218, 0, &fonts::FreeMono9pt7b);
+
+          //lcd.fillRect(230, 0, 10, 18, 0xFFFFCC00u);
+          lcd.setTextColor(0xFF996600u, 0xFFFFCC00u);
+          lcd.drawString(lbl[i], 230, 0, &fonts::FreeMonoBold9pt7b);
+          lcd.setTextColor(0xFFFFCC00u, 0xFF996600u);
 
           std::int8_t b = hexButton(i);
           //console_printf("btn %d\r\n", b);
 
           if (btn[i].justPressed()) {
-            if (lbl[i][0] == '<' && currPrg > 0) {
-              currPrg -= 1;
-              showCurrPrg();
+            if (isMonitor) {
+              if (b == KEY_LEFT) {
+                if (monitorAddr >= 0x202) {
+                  monitorAddr -= 2;
+                  monitorNibble = 0;
+                  showMonitor(&emu);
+                }
+              }
+              else
+              if (b == KEY_RIGHT) {
+                if (monitorAddr < 4 * 1024 - 2) {
+                  monitorAddr += 2;
+                  monitorNibble = 0;
+                  showMonitor(&emu);
+                }
+              }
+              else
+              if (b == KEY_GO) {
+              }
+              else
+              if (b == KEY_MONITOR) {
+                isMonitor = false;
+                lcd.fillRect(0, 15, 240, 102, 0xFF996600u);
+              }
+              else {
+                uint8_t* m = &emu.ram[monitorAddr];
+                switch (monitorNibble) {
+                  case 0:
+                    *m = (*m & 0xF) | (b << 4);
+                    break;
+                  case 1:
+                    *m = (*m & 0xF0) | b;
+                    break;
+                  case 2:
+                    *(m+1) = (*(m+1) & 0xF) | (b << 4);
+                    break;
+                  case 3:
+                    *(m+1) = (*(m+1) & 0xF0) | b;
+                    break;
+                }
+                monitorNibble += 1;
+                if (monitorNibble == 4) {
+                  monitorNibble = 0;
+                  monitorAddr += 2;
+                }
+                showMonitor(&emu);
+              }
             }
-            else
-            if (lbl[i][0] == '>' && currPrg < prgCount - 1) {
-              currPrg += 1;
-              showCurrPrg();
-            }
-            else
-            if (lbl[i][0] == 'G' ) {
-              loadCurrPrg();
+            else {
+              // not isMonitor
+              if (b == KEY_LEFT) {
+                if (currPrg > 0) {
+                  currPrg -= 1;
+                  showCurrPrg();
+                }
+              }
+              else
+              if (b == KEY_RIGHT) {
+                if (currPrg < prgCount - 1) {
+                  currPrg += 1;
+                  showCurrPrg();
+                }
+              }
+              else
+              if (b == KEY_GO) {
+                loadCurrPrg();
+              }
+              else
+              if (b == KEY_MONITOR) {
+                isMonitor = true;
+                showMonitor(&emu);
+              }
             }
           }
-
-          emu.keys[b] = true;
+          if (b >= 0) {
+            emu.keys[b] = true;
+          }
         }
       }
     }
     else {
+      // not touched
       for (int i = 0; i < 20; i++) {
         if (btn[i].isPressed()) {
           btn[i].press(false);
           btn[i].drawButton(false);
-          emu.keys[hexButton(i)] = false;
 
-#if 0
-          lcd.fillRect(200, 110, 35, 35, 0xFF996600u);
-#endif
+          std::int8_t b = hexButton(i);
+          if (b >= 0) {
+            emu.keys[b] = false;
+          }
+          lcd.fillRect(230, 0, 10, 18, 0xFFFFCC00u);
         }
       }
     }
 
-    emu_step(&emu);
-    ui_run(&emu);
+    if (!isMonitor) { 
+      emu_step(&emu);
+      ui_run(&emu);
+    }
   }
 }
 
