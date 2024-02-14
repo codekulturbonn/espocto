@@ -1,6 +1,6 @@
 # ESP-Octo
 
-Port of the wonderful [Octo](https://github.com/JohnEarnest/c-octo.git) by John Earnest to [ESP32-2432S024C](https://www.aliexpress.com/item/1005005865107357.html) with capacitive touch.
+Port of the wonderful [Octo](https://github.com/JohnEarnest/c-octo.git) (just the emulator, not the complete IDE) by John Earnest to [ESP32-2432S024C](https://www.aliexpress.com/item/1005005865107357.html) with capacitive touch.
 
 The UI is self-contained. The 320x240 pixel display shows the classic CHIP-8 hex display, extended by four buttons to browse games from [the CHIP-8 archive]() ("<", ">", "G") or switch to the built-in monitor and disassembler ("M").
 
@@ -9,6 +9,8 @@ The goal is to create a cheap, self-contained gadget that allows to examine and 
 ![Play games](doc/play.png)
 
 ![Learn to code](doc/study-code.png)
+
+There are versions for small ESP32-based boards as well as a simulator for desktop PCs (currently tested on Linux; should work on macOS).
 
 ## Checkout
 
