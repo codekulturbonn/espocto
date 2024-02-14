@@ -55,11 +55,11 @@ public:
       cfg.freq_read  = 20000000;    // SPI clock when receiving 
       cfg.spi_3wire  = false;       // Set true when receiving with MOSI pin 
       cfg.use_lock   = true;        // Set to true when using transaction lock
-      cfg.dma_channel = 1;          // Set the DMA channel (1 or 2. 0=disable)
-      cfg.pin_sclk = 14;            // Set SPI SCLK pin number 
-      cfg.pin_mosi = 13;            // Set SPI MOSI pin number
-      cfg.pin_miso = 12;            // Set SPI MISO pin number (-1 = disable) 
-      cfg.pin_dc   = 2;             // Set SPI D / C pin number (-1 = disable) 
+      cfg.dma_channel = ILI9341_SPI_DMA_CHANNEL;          // Set the DMA channel (1 or 2. 0=disable)
+      cfg.pin_sclk = ILI9341_SPI_BUS_SCLK_IO_NUM;            // Set SPI SCLK pin number 
+      cfg.pin_mosi = ILI9341_SPI_BUS_MOSI_IO_NUM;            // Set SPI MOSI pin number
+      cfg.pin_miso = ILI9341_SPI_BUS_MISO_IO_NUM;            // Set SPI MISO pin number (-1 = disable) 
+      cfg.pin_dc   = ILI9341_SPI_CONFIG_DC_GPIO_NUM;             // Set SPI D / C pin number (-1 = disable) 
 
       _bus_instance.config(cfg);    // The set value is reflected on the bus.
       _panel_instance.setBus(&_bus_instance);      // Set the bus on the panel.
@@ -67,8 +67,8 @@ public:
 
     { // Set the display panel control.
       auto cfg = _panel_instance.config();    // Gets the structure for display panel settings.
-      cfg.pin_cs           =    15;  // Pin number to which CS is connected (-1 = disable) 
-      cfg.pin_rst          =    -1;  // Pin number to which RST is connected (-1 = disable) 
+      cfg.pin_cs           =    ILI9341_SPI_CONFIG_CS_GPIO_NUM;  // Pin number to which CS is connected (-1 = disable) 
+      cfg.pin_rst          =    CST816S_TOUCH_CONFIG_RST_GPIO_NUM;  // Pin number to which RST is connected (-1 = disable) 
       cfg.pin_busy         =    -1;  // Pin number to which BUSY is connected (-1 = disable) 
       cfg.memory_width     =   240;  // Maximum width supported by driver IC 
       cfg.memory_height    =   320;  // Maximum height supported by driver IC 
@@ -91,7 +91,7 @@ public:
     { // Set the backlight control. (Delete if not needed
       auto cfg = _light_instance.config();    // Gets the structure for the backlight setting. 
 
-      cfg.pin_bl = 27;              // Pin number to which the backlight is connected 
+      cfg.pin_bl = BCKL;              // Pin number to which the backlight is connected 
       cfg.invert = false;           // True if you want to invert the brightness of the backlight 
       cfg.freq   = 44100;           // Backlight PWM frequency 
       cfg.pwm_channel = 7;          // PWM channel number to use 
@@ -99,28 +99,25 @@ public:
       _light_instance.config(cfg);
       _panel_instance.setLight(&_light_instance);  // Set the backlight on the panel. 
     }
-
-  #if 0
+#if 0
     { // Set the touch screen control. (Delete if not needed)
       auto cfg = _touch_instance.config();
       cfg.x_min      = 0;    // Minimum X value (raw value) obtained from touch screen 
-      cfg.x_max      = 239;  // Maximum X value (raw value) obtained from the touch screen 
+      cfg.x_max      = CST816S_TOUCH_CONFIG_X_MAX;  // Maximum X value (raw value) obtained from the touch screen 
       cfg.y_min      = 0;    // Minimum Y value (raw value) obtained from touch screen
-      cfg.y_max      = 319;  // Maximum Y value (raw value) obtained from the touch screen 
-      cfg.pin_int    = 36;   // Pin number to which INT is connected 
-      cfg.bus_shared = true; // Set to true if you are using the same bus as the screen 
-      cfg.offset_rotation = 0;// Adjustment when the display and touch orientation do not match Set with a value from 0 to 7 
-      cfg.spi_host = VSPI_HOST;// Select the SPI to use (HSPI_HOST or VSPI_HOST) 
-      cfg.freq = 2500000;     // Set SPI clock 
-      cfg.pin_sclk = 25;     // Pin number to which SCLK is connected 
-      cfg.pin_mosi = 32;     // Pin number to which MOSI is connected 
-      cfg.pin_miso = 39;     // Pin number to which MISO is connected 
-      cfg.pin_cs   = 33;     // Pin number to which CS is connected 
-      
+      cfg.y_max      = CST816S_TOUCH_CONFIG_Y_MAX;  // Maximum Y value (raw value) obtained from the touch screen 
+      cfg.pin_int    = CST816S_TOUCH_CONFIG_INT_GPIO_NUM;   // Pin number to which INT is connected 
+
+      cfg.i2c_port = CST816S_I2C_HOST;
+      cfg.i2c_addr = 0x15;
+      cfg.pin_sda  = CST816S_I2C_CONFIG_SDA_IO_NUM;
+      cfg.pin_scl  = CST816S_I2C_CONFIG_SCL_IO_NUM;
+      cfg.freq = CST816S_I2C_CONFIG_MASTER_CLK_SPEED;
+
       _touch_instance.config(cfg);
       _panel_instance.setTouch(&_touch_instance);  // Set the touch screen on the panel. 
     }
-  #endif
+#endif
     setPanel(&_panel_instance); // Set the panel to be used. 
   }
 };
@@ -134,8 +131,8 @@ CST820 touch(I2C_SDA, I2C_SCL, TP_RST, TP_INT);
 #include "console.h"
 #include "octo_emulator.h"
 
-const int WIDTH = 320;
-const int HEIGHT = 240;
+const int WIDTH = LCD_HEIGHT;
+const int HEIGHT = LCD_WIDTH;
 
 #if defined ( SDL_h_ )
 static LGFX lcd(WIDTH, HEIGHT, 2);
@@ -583,6 +580,8 @@ void loop(void)
     touched = touch.getTouch(&touchX, &touchY, &gesture);
 
     if (touched) {
+    //if (lcd.getTouch(&touchX, &touchY)) {
+      //console_printf("touched %d %d\r\n", touchX, touchY);
       for (int i = 0; i < 20; i++) {
         if (btn[i].contains(touchX, touchY)) {
           btn[i].press(true);

@@ -4,9 +4,6 @@
 [submodule "vendor/boards"]
 	path = vendor/boards
 	url = https://github.com/rzeldent/platformio-espressif32-sunton
-[submodule "c-octo"]
-	path = c-octo
-	url = https://github.com/JohnEarnest/c-octo.git
 [submodule "vendor/c-octo"]
 	path = vendor/c-octo
 	url = https://github.com/JohnEarnest/c-octo.git
