@@ -3,38 +3,24 @@
  */ 
 #include <string.h>
 
-#include <SPI.h>
-#include <SD.h>
-
 #define SD_CS 5 
-
-
-struct prgInfo_t {
-  char* name;
-  int tickrate;
-  char* fillColor;
-  char* backgroundColor;
-  char* buzzColor;
-  char* quietColor;
-  bool shiftQuirks;
-  bool loadStoreQuirks;
-};
-
-prgInfo_t* prg;
-int prgCount = 0;
-int prgSpace = 0;
-int currPrg = 55; // octojam1title.ch8
-
-char* ch8 = NULL;
-int ch8Size;
-
-bool isMonitor = false;
-uint16_t monitorAddr;
-uint8_t monitorNibble;
 
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
 #include <lgfx/v1/LGFX_Button.hpp>
+
+#ifdef TARGET_NATIVE
+#include <LGFX_AUTODETECT.hpp>
+#include <cstdint>
+
+#define LCD_HEIGHT 240
+#define LCD_WIDTH 320
+#endif
+
+#ifdef TARGET_ESP32
+#include <SPI.h>
+#include <SD.h>
+
 #include "CST820.h"
 
 class LGFX : public lgfx::LGFX_Device
@@ -127,9 +113,33 @@ public:
 #define TP_RST 25
 #define TP_INT 21
 CST820 touch(I2C_SDA, I2C_SCL, TP_RST, TP_INT);
+#endif
 
 #include "console.h"
 #include "octo_emulator.h"
+
+struct prgInfo_t {
+  char* name;
+  int tickrate;
+  char* fillColor;
+  char* backgroundColor;
+  char* buzzColor;
+  char* quietColor;
+  bool shiftQuirks;
+  bool loadStoreQuirks;
+};
+
+prgInfo_t* prg;
+int prgCount = 0;
+int prgSpace = 0;
+int currPrg = 55; // octojam1title.ch8
+
+char* ch8 = NULL;
+int ch8Size;
+
+bool isMonitor = false;
+uint16_t monitorAddr;
+uint8_t monitorNibble;
 
 const int WIDTH = LCD_HEIGHT;
 const int HEIGHT = LCD_WIDTH;
@@ -138,8 +148,8 @@ const int HEIGHT = LCD_WIDTH;
 static LGFX lcd(WIDTH, HEIGHT, 2);
 #else
 static LGFX lcd;
-static LGFX_Sprite sprite(&lcd);
 #endif
+static LGFX_Sprite sprite(&lcd);
 
 static char lbl[20][2] = { 
   "1", "2", "3", "C", "<",
@@ -226,20 +236,32 @@ void showCurrPrg() {
 }
 
 void loadCurrPrg() {
-  char* path = (char*) malloc(12 + strlen(prg[currPrg].name));
-  strcpy(path, "/chip8/");
+  char* path = (char*) malloc(11 + strlen(prg[currPrg].name));
+  strcpy(path, "chip8/");
   strcat(path, prg[currPrg].name);
   strcat(path, ".ch8");
+#ifdef TARGET_ESP32
   File f = SD.open(path);
   ch8Size = f.size();
+#else
+  FILE* f = fopen(path, "r");
+  fseek(f, 0, SEEK_END);
+  ch8Size = ftell(f);
+  rewind(f); 
+#endif
   if (ch8) {
     ch8 = (char*)realloc(ch8, ch8Size);
   }
   else {
     ch8 = (char*)malloc(ch8Size);
   }
+#ifdef TARGET_ESP32
   f.read((uint8_t*)ch8, ch8Size);
   f.close();
+#else
+  fread(ch8, ch8Size, 1, f);
+  fclose(f);
+#endif
   free(path);
 
   octo_default_options(&options);
@@ -255,15 +277,30 @@ void loadCurrPrg() {
 }
 
 void loadPrgInfo(void) {
+#ifdef TARGET_ESP32
   File f = SD.open("/chip8.txt");
+#else
+  FILE* f = fopen("chip8.txt", "r");
+#endif
   if (!f) {
     console_printf("Can't read info\r\n");
     return;
   }
+#ifdef TARGET_ESP32
   int size = f.size();
+#else
+  fseek(f, 0, SEEK_END);
+  int size = ftell(f);
+  rewind(f); 
+#endif
   char* info = (char*)malloc(size + 1);
+#ifdef TARGET_ESP32
   f.read((uint8_t*)info, size);
   f.close();
+#else
+  fread(info, size, 1, f);
+  fclose(f);
+#endif
   info[size] = '\0';
 
   prg = (prgInfo_t*)malloc(30 * sizeof(prgInfo_t));
@@ -300,19 +337,25 @@ void loadPrgInfo(void) {
 
 void setup(void)
 {
+#ifdef TARGET_ESP32
   Serial.begin(115200);
 
   if (!SD.begin(SD_CS)) {
     console_printf("SD.begin failed!\r\n");
     while (1) delay(0);
   }
+#endif
 
   loadPrgInfo();
 
   lcd.init();
+#ifdef TARGET_ESP32
   lcd.setRotation(2);
+#endif
 
+#ifdef TARGET_ESP32
   touch.begin();
+#endif
 
 //  lcd.setBrightness(128);
   lcd.setColorDepth(16);
@@ -533,8 +576,6 @@ char* instr(octo_emulator* emu, uint16_t addr) {
 }
 
 void showMonitor(octo_emulator* emu) {
-  console_printf("Monitor\r\n");
-
   lcd.fillRect(0, 20, 240, 108, 0xFF996600u);
 
   uint16_t addr = monitorAddr - 2;
@@ -577,7 +618,17 @@ void loop(void)
     uint8_t gesture;
     uint16_t touchX, touchY;
 
+#ifdef TARGET_ESP32
     touched = touch.getTouch(&touchX, &touchY, &gesture);
+#endif
+
+#ifdef TARGET_NATIVE
+ lgfx::touch_point_t new_tp;
+
+  touched = lcd.getTouch(&new_tp);
+  touchX = new_tp.x;
+  touchY = new_tp.y;
+#endif
 
     if (touched) {
     //if (lcd.getTouch(&touchX, &touchY)) {

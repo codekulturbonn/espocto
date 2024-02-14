@@ -1,3 +1,5 @@
+#ifdef TARGET_ESP32
+
 #include "CST820.h"
 
 CST820::CST820(int8_t sda_pin, int8_t scl_pin, int8_t rst_pin, int8_t int_pin)
@@ -112,3 +114,4 @@ uint8_t CST820::i2c_write_continuous(uint8_t addr, const uint8_t *data, uint32_t
   if ( Wire.endTransmission(true))return -1;
   return 0;
 }
+#endif
