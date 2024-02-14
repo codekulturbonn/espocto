@@ -7,3 +7,6 @@
 [submodule "vendor/c-octo"]
 	path = vendor/c-octo
 	url = https://github.com/JohnEarnest/c-octo.git
+[submodule "vendor/chip8Archive"]
+	path = vendor/chip8Archive
+	url = https://github.com/JohnEarnest/chip8Archive
