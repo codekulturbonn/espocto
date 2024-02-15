@@ -40,4 +40,4 @@ Here are some pictures:
 
 ![Back, right](doc/board-backright.jpg)
 
-Obviously, the stack needs to get an 3d-printed case:
+Obviously, the assembly needs to get a 3d-printed case.
