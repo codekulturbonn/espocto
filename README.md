@@ -29,3 +29,15 @@ There are ~100 games from [the CHIP-8 archive](https://johnearnest.github.io/chi
 ## The Board
 
 The ESP32-2432S024C is one of the _Sunton_ branded yellow ESP32 boards with a display. It is an even smaller and cheaper sibbling to the _[Cheap Yellow Display](https://github.com/topics/cheap-yellow-display). I have attached a rechargable battery ([3,7V 3000mAh LiPo Akku](https://amzn.to/3uwWGVx) - affiliate link) and a small speaker ([Adafruit Mini-Lautsprecher, oval, 8 Ohm, 1 Watt (3923)](https://amzn.to/3I1CT3r) - affiliate link) to their respective JST 1.25 connectors.
+
+Here are some pictures:
+
+![Front, left](doc/board-frontleft.jpg)
+
+![Back](doc/board-back.jpg)
+
+![Back, left](doc/board-backleft.jpg)
+
+![Back, right](doc/board-backright.jpg)
+
+Obviously, the stack needs to get an 3d-printed case:
