@@ -6,9 +6,11 @@ The UI is self-contained. The 320x240 pixel display shows the classic CHIP-8 hex
 
 The goal is to create a cheap, self-contained gadget that allows to examine and write fun games completely without a connected computer. 
 
-![Play games](doc/play.png)
+![Play games (simulator)](doc/play.png)
 
-![Learn to code](doc/study-code.png)
+![WDL game (device)](doc/wdl.jpg)
+
+![Learn to code (simulator)](doc/study-code.png)
 
 There are versions for small ESP32-based boards as well as a simulator for desktop PCs (currently tested on Linux; should work on macOS).
 
@@ -23,3 +25,7 @@ The touch interface is a CST820, connected with I2C. This is not supported by Lo
 ## Games
 
 There are ~100 games from [the CHIP-8 archive](https://johnearnest.github.io/chip8Archive/) in "vendor/chip8Archive/roms". Put them in an SDcard in directory "/chip8". Also, put file "chip8.txt" in the root directory of this SDcard. This file is created from "chip8Archive/programs.json" with a small Python script.
+
+## The Board
+
+The ESP32-2432S024C is one of the _Sunton_ branded yellow ESP32 boards with a display. It is an even smaller and cheaper sibbling to the _[Cheap Yellow Display](https://github.com/topics/cheap-yellow-display). I have attached a rechargable battery ([3,7V 3000mAh LiPo Akku](https://amzn.to/3uwWGVx) - affiliate link) and a small speaker ([Adafruit Mini-Lautsprecher, oval, 8 Ohm, 1 Watt (3923)](https://amzn.to/3I1CT3r) - affiliate link) to their respective JST 1.25 connectors.
