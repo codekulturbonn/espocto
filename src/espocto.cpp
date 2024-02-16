@@ -141,6 +141,11 @@ bool isMonitor = false;
 uint16_t monitorAddr;
 uint8_t monitorNibble;
 
+enum {
+  PAGE_MAIN,
+  PAGE_SAVE
+} page;
+
 const int WIDTH = LCD_HEIGHT;
 const int HEIGHT = LCD_WIDTH;
 
@@ -159,8 +164,6 @@ static char lbl[20][2] = {
 };
 
 static LGFX_Button btn[20];
-
-static LGFX_Button btnFlag;
 
 #ifdef TARGET_NATIVE
 #include <chrono>
@@ -236,8 +239,13 @@ void showCurrPrg() {
 }
 
 void loadCurrPrg() {
-  char* path = (char*) malloc(11 + strlen(prg[currPrg].name));
+  // 12 = "/chip8/" + ".ch8" + '\0'
+  char* path = (char*) malloc(12 + strlen(prg[currPrg].name));
+#ifdef TARGET_ESP32
+  strcpy(path, "/chip8/");
+#else
   strcpy(path, "chip8/");
+#endif
   strcat(path, prg[currPrg].name);
   strcat(path, ".ch8");
 #ifdef TARGET_ESP32
@@ -335,6 +343,112 @@ void loadPrgInfo(void) {
   console_printf("%d files read.\r\n", prgCount);
 }
 
+#ifdef TARGET_NATIVE
+/**
+*
+*  Audio
+*
+**/
+#include <SDL.h>
+
+#define AUDIO_FRAG_SIZE 1024
+#define AUDIO_SAMPLE_RATE (4096*8)
+
+#define UI_VOLUME 64
+
+SDL_AudioSpec audio;
+
+void audio_pump(void*user,Uint8*stream,int len){
+  octo_emulator*emu= (octo_emulator*) user;
+  double freq=4000*pow(2,(emu->pitch-64)/48.0);
+  for(int z = 0; z < len; z++) {
+    int ip = emu->osc;
+    stream[z] = !emu->had_sound 
+      ? audio.silence 
+      : ( emu->pattern[ip>>3] >> ((ip&7)^7) ) & 1 
+        ? UI_VOLUME
+        : audio.silence;
+    emu->osc = fmod(emu->osc + (freq / AUDIO_SAMPLE_RATE), 128.0);
+  }
+  emu->had_sound=0;
+}
+
+void audio_init(octo_emulator*emu){
+  SDL_memset(&audio,0,sizeof(audio));
+  audio.freq=AUDIO_SAMPLE_RATE;
+  audio.format=AUDIO_S8;
+  audio.channels=1;
+  audio.samples=AUDIO_FRAG_SIZE;
+  audio.callback=audio_pump;
+  audio.userdata=emu;
+  if (UI_VOLUME) {
+    if (SDL_OpenAudio(&audio,NULL)) {
+      printf("failed to initialize audio: %s\n", SDL_GetError());
+    }
+    else { SDL_PauseAudio(0); }
+  }
+}
+#else
+#if 0
+#include <Arduino.h>
+#include <driver/i2s.h>
+
+#define AUDIO_FRAG_SIZE 1024
+#define AUDIO_SAMPLE_RATE (4096*8)
+
+// I2S Konfiguration
+#define I2S_NUM         (0) // I2S port number
+#define I2S_BCK_IO      (26) // Bit Clock Pin
+#define I2S_WS_IO       (25) // Word Select Pin
+#define I2S_DO_IO       (22) // Data Out Pin
+#define I2S_DI_IO       (-1) // Data In Pin, nicht verwendet
+
+void audio_pump(void *user, int16_t *stream, int len) {
+  octo_emulator *emu = (octo_emulator*)user;
+  double freq = 4000 * pow(2, (emu->pitch - 64) / 48.0);
+  for (int z = 0; z < len; z++) {
+    int ip = emu->osc;
+    stream[z] = !emu->had_sound ? 0 : (emu->pattern[ip >> 3] >> ((ip & 7) ^ 7)) & 1 ? INT16_MAX * ui.volume : 0;
+    emu->osc = fmod(emu->osc + (freq / AUDIO_SAMPLE_RATE), 128.0);
+  }
+  emu->had_sound = 0;
+}
+
+void audio_init(octo_emulator *emu) {
+  const i2s_config_t i2s_config = {
+    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
+    .sample_rate = AUDIO_SAMPLE_RATE,
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+    .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT, // Mono-Ausgabe
+    .communication_format = I2S_COMM_FORMAT_I2S_MSB,
+    .intr_alloc_flags = 0, // Standard Interrupt Priority
+    .dma_buf_count = 8,
+    .dma_buf_len = AUDIO_FRAG_SIZE,
+    .use_apll = false,
+    .tx_desc_auto_clear = true, // Auto clear tx descriptor on underflow
+    .fixed_mclk = 0
+  };
+
+  const i2s_pin_config_t pin_config = {
+    .bck_io_num = I2S_BCK_IO,
+    .ws_io_num = I2S_WS_IO,
+    .data_out_num = I2S_DO_IO,
+    .data_in_num = I2S_DI_IO
+  };
+
+  // I2S Treiber installieren und Konfiguration für I2S port setzen
+  i2s_driver_install(I2S_NUM, &i2s_config, 0, NULL);
+  i2s_set_pin(I2S_NUM, &pin_config);
+
+  // Optional: I2S Bits pro Sample und Kanal-Format einstellen
+  i2s_set_clk(I2S_NUM, AUDIO_SAMPLE_RATE, I2S_BITS_PER_SAMPLE_16BIT, I2S_CHANNEL_MONO);
+}
+
+// Die audio_pump Funktion muss periodisch aufgerufen werden, um das Audiobuffer zu füllen.
+// Dies könnte in einem dedizierten Task oder in der main loop erfolgen, abhängig von der Struktur Ihrer Anwendung.
+#endif
+#endif
+
 void setup(void)
 {
 #ifdef TARGET_ESP32
@@ -362,8 +476,14 @@ void setup(void)
   lcd.fillScreen(0xFF996600u);
   lcd.setFont(&fonts::FreeMonoBold12pt7b);
 
+#if 0
+  audio_init(&emu);
+#endif
+
   loadCurrPrg();
   drawButtons();
+
+  page = PAGE_MAIN;
 }
 
 void ui_run(octo_emulator* emu) {
@@ -408,7 +528,7 @@ void emu_step(octo_emulator* emu) {
   if (emu->halt) {
     if (!flagged) {
         flagged = true;
-        console_printf("halted");
+        console_printf("halted\r\n");
     }
     return;
   }
@@ -603,6 +723,194 @@ void showMonitor(octo_emulator* emu) {
   }
 }
 
+void showSavePage(void) {
+  static LGFX_Button buttons[40];
+  LGFX_Button* btn;
+  char lbl[4];
+  int x, w;
+
+  lcd.fillScreen(0xFF996600u);
+  showCurrPrg();
+
+  for (int row = 0; row < 8; row++) {
+    for (int col = 0; col < 5; col++) {
+      lbl[1] = '\0';
+      x = 36 + col * 42;
+      w = 36;
+
+      if (row < 2) {
+        lbl[0] = '0' + row * 5 + col;
+      }
+      else
+      if (row < 7) {
+        lbl[0] = 'A' + (row - 2) * 5 + col;
+      }
+      else {
+        switch (col) {
+          case 0:
+            lbl[0] = 'Z';
+            break;
+          case 1:
+            strcpy(lbl, "Del");
+            x += 7;
+            w = 50;
+            break;
+          case 2:
+            strcpy(lbl, "Clr");
+            x += 21;
+            w = 50;
+            break;
+          case 4:
+            strcpy(lbl, "OK!");
+            x -= 8;
+            w = 50;
+            break;
+          default:
+            continue;
+        }      
+      }
+      btn = &buttons[row * 5 + col];
+      btn->initButton(&lcd,
+        x,
+        40 + row * 36,      // y
+        w,
+        30,     // h
+        0xFFFFCC00u,        // outline
+        0xFF996600u,        // fill
+        0xFFFFCC00u,        // textcolor
+        lbl,    // label
+        1.0,    // textsize x
+        1.0     // textsize y
+      );
+      btn->drawButton();
+    }
+  }
+  page = PAGE_SAVE;
+}
+
+void handleTouchMain(int touchX, int touchY) {
+  for (int i = 0; i < 20; i++) {
+    if (btn[i].contains(touchX, touchY)) {
+      btn[i].press(true);
+      btn[i].drawButton(true);
+
+      //lcd.fillRect(218, 0, 22, 14, 0xFF996600u);
+      //lcd.setTextColor(0xFFFFCC00u);
+      //lcd.drawString(lbl[i], 218, 0, &fonts::FreeMono9pt7b);
+
+      //lcd.fillRect(230, 0, 10, 18, 0xFFFFCC00u);
+      lcd.setTextColor(0xFF996600u, 0xFFFFCC00u);
+      lcd.drawString(lbl[i], 228, 0, &fonts::FreeMonoBold9pt7b);
+      lcd.setTextColor(0xFFFFCC00u, 0xFF996600u);
+
+      std::int8_t b = hexButton(i);
+      //console_printf("btn %d\r\n", b);
+
+      if (btn[i].justPressed()) {
+        if (isMonitor) {
+          if (b == KEY_LEFT) {
+            if (monitorAddr >= 0x202) {
+              monitorAddr -= 2;
+              monitorNibble = 0;
+              showMonitor(&emu);
+            }
+          }
+          else
+          if (b == KEY_RIGHT) {
+            if (monitorAddr < 4 * 1024 - 2) {
+              monitorAddr += 2;
+              monitorNibble = 0;
+              showMonitor(&emu);
+            }
+          }
+          else
+          if (b == KEY_GO) {
+            console_printf("Saving...\r\n");
+            showSavePage();
+          }
+          else
+          if (b == KEY_MONITOR) {
+            isMonitor = false;
+            lcd.fillRect(0, 15, 240, 102, 0xFF996600u);
+          }
+          else {
+            uint8_t* m = &emu.ram[monitorAddr];
+            switch (monitorNibble) {
+              case 0:
+                *m = (*m & 0xF) | (b << 4);
+                break;
+              case 1:
+                *m = (*m & 0xF0) | b;
+                break;
+              case 2:
+                *(m+1) = (*(m+1) & 0xF) | (b << 4);
+                break;
+              case 3:
+                *(m+1) = (*(m+1) & 0xF0) | b;
+                break;
+            }
+            monitorNibble += 1;
+            if (monitorNibble == 4) {
+              monitorNibble = 0;
+              monitorAddr += 2;
+            }
+            showMonitor(&emu);
+          }
+        }
+        else {
+          // not isMonitor
+          if (b == KEY_LEFT) {
+            if (currPrg > 0) {
+              currPrg -= 1;
+              showCurrPrg();
+            }
+          }
+          else
+          if (b == KEY_RIGHT) {
+            if (currPrg < prgCount - 1) {
+              currPrg += 1;
+              showCurrPrg();
+            }
+          }
+          else
+          if (b == KEY_GO) {
+            loadCurrPrg();
+          }
+          else
+          if (b == KEY_MONITOR) {
+            isMonitor = true;
+            showMonitor(&emu);
+          }
+        }
+      }
+      if (b >= 0) {
+        emu.keys[b] = true;
+      }
+    }
+  }
+}
+
+void handleUntouchMain() {
+  for (int i = 0; i < 20; i++) {
+    if (btn[i].isPressed()) {
+      btn[i].press(false);
+      btn[i].drawButton(false);
+
+      std::int8_t b = hexButton(i);
+      if (b >= 0) {
+        emu.keys[b] = false;
+      }
+      lcd.fillRect(228, 0, 10, 18, 0xFFFFCC00u);
+    }
+  }
+}
+
+void handleTouchSave(int touchX, int touchY) {
+}
+
+void handleUntouchSave() {
+}
+
 unsigned long previousMillis = 0; // will store last time the function was called
 const long interval = 22;// 33; // interval at which to call function (milliseconds)
 
@@ -633,121 +941,25 @@ void loop(void)
     if (touched) {
     //if (lcd.getTouch(&touchX, &touchY)) {
       //console_printf("touched %d %d\r\n", touchX, touchY);
-      for (int i = 0; i < 20; i++) {
-        if (btn[i].contains(touchX, touchY)) {
-          btn[i].press(true);
-          btn[i].drawButton(true);
 
-          //lcd.fillRect(218, 0, 22, 14, 0xFF996600u);
-          //lcd.setTextColor(0xFFFFCC00u);
-          //lcd.drawString(lbl[i], 218, 0, &fonts::FreeMono9pt7b);
-
-          //lcd.fillRect(230, 0, 10, 18, 0xFFFFCC00u);
-          lcd.setTextColor(0xFF996600u, 0xFFFFCC00u);
-          lcd.drawString(lbl[i], 230, 0, &fonts::FreeMonoBold9pt7b);
-          lcd.setTextColor(0xFFFFCC00u, 0xFF996600u);
-
-          std::int8_t b = hexButton(i);
-          //console_printf("btn %d\r\n", b);
-
-          if (btn[i].justPressed()) {
-            if (isMonitor) {
-              if (b == KEY_LEFT) {
-                if (monitorAddr >= 0x202) {
-                  monitorAddr -= 2;
-                  monitorNibble = 0;
-                  showMonitor(&emu);
-                }
-              }
-              else
-              if (b == KEY_RIGHT) {
-                if (monitorAddr < 4 * 1024 - 2) {
-                  monitorAddr += 2;
-                  monitorNibble = 0;
-                  showMonitor(&emu);
-                }
-              }
-              else
-              if (b == KEY_GO) {
-              }
-              else
-              if (b == KEY_MONITOR) {
-                isMonitor = false;
-                lcd.fillRect(0, 15, 240, 102, 0xFF996600u);
-              }
-              else {
-                uint8_t* m = &emu.ram[monitorAddr];
-                switch (monitorNibble) {
-                  case 0:
-                    *m = (*m & 0xF) | (b << 4);
-                    break;
-                  case 1:
-                    *m = (*m & 0xF0) | b;
-                    break;
-                  case 2:
-                    *(m+1) = (*(m+1) & 0xF) | (b << 4);
-                    break;
-                  case 3:
-                    *(m+1) = (*(m+1) & 0xF0) | b;
-                    break;
-                }
-                monitorNibble += 1;
-                if (monitorNibble == 4) {
-                  monitorNibble = 0;
-                  monitorAddr += 2;
-                }
-                showMonitor(&emu);
-              }
-            }
-            else {
-              // not isMonitor
-              if (b == KEY_LEFT) {
-                if (currPrg > 0) {
-                  currPrg -= 1;
-                  showCurrPrg();
-                }
-              }
-              else
-              if (b == KEY_RIGHT) {
-                if (currPrg < prgCount - 1) {
-                  currPrg += 1;
-                  showCurrPrg();
-                }
-              }
-              else
-              if (b == KEY_GO) {
-                loadCurrPrg();
-              }
-              else
-              if (b == KEY_MONITOR) {
-                isMonitor = true;
-                showMonitor(&emu);
-              }
-            }
-          }
-          if (b >= 0) {
-            emu.keys[b] = true;
-          }
-        }
+      switch (page) {
+        case PAGE_MAIN:
+          handleTouchMain(touchX, touchY);
+        case PAGE_SAVE:
+          handleTouchSave(touchX, touchY);
       }
     }
     else {
       // not touched
-      for (int i = 0; i < 20; i++) {
-        if (btn[i].isPressed()) {
-          btn[i].press(false);
-          btn[i].drawButton(false);
-
-          std::int8_t b = hexButton(i);
-          if (b >= 0) {
-            emu.keys[b] = false;
-          }
-          lcd.fillRect(230, 0, 10, 18, 0xFFFFCC00u);
-        }
+      switch (page) {
+        case PAGE_MAIN:
+          handleUntouchMain();
+        case PAGE_SAVE:
+          handleUntouchSave();
       }
     }
 
-    if (!isMonitor) { 
+    if (page == PAGE_MAIN && !isMonitor) { 
       emu_step(&emu);
       ui_run(&emu);
     }
