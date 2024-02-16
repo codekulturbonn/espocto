@@ -98,3 +98,5 @@ turnover77,200,#FFe900,#ED7f37,#FFAA00,#000000,0,0
 ultimatetictactoe,7,#553300,#FFFFFF,#FFAA00,#FFFFFF,0,0
 wdl,15,gray,lightgray,red,#000000,0,0
 wonkypong,100,#000000,#FFFFFF,#666666,#000000,0,0
+test_opcode,7,#FFAA00,#AA4400,#FFAA00,#000000,0,0
+chip8-test-rom-with-audio,7,#FFAA00,#AA4400,#FFAA00,#000000,0,0

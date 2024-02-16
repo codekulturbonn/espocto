@@ -473,10 +473,10 @@ void setup(void)
 
 //  lcd.setBrightness(128);
   lcd.setColorDepth(16);
-  lcd.fillScreen(0xFF996600u);
+  lcd.fillScreen(0xFF000000u);
   lcd.setFont(&fonts::FreeMonoBold12pt7b);
 
-#if 0
+#if TARGET_NATIVE
   audio_init(&emu);
 #endif
 
@@ -507,6 +507,7 @@ void ui_run(octo_emulator* emu) {
   sprite.createSprite(w, h);
   sprite.setPivot(w / 2, 0);
   sprite.setColorDepth(4);
+  sprite.setPaletteColor(0, 0xFF996600u);
   sprite.setPaletteColor(1, 0xFFFFCC00u);
   sprite.setPaletteColor(2, 0xFFFF6600u);
   sprite.setPaletteColor(3, 0xFF662200u);
