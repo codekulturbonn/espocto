@@ -41,3 +41,21 @@ Here are some pictures:
 ![Back, right](doc/board-backright.jpg)
 
 Obviously, the assembly needs to get a 3d-printed case.
+
+## Accessories
+
+The Nunchuk controller for the Wii connects via I2C. This makes it easy, with a small adapter, to support these as game controller.
+
+![Adapter](doc/adapter.jpg) by [thingm](https://labs.thingm.com) - [Clone](https://amzn.to/3wkG3wN) - affiliate link
+
+![Wii Nunchuk](doc/wii-nunchuk.jpg) - [Clone](https://amzn.to/48jkJVO) - affiliate link
+
+![Wii Controller](doc/wii-controller.jpg)
+
+2024-02-18: 
+
+Sadly, I could not get neither of my Nunchuks to work with the [example code](https://raw.githubusercontent.com/witnessmenow/ESP32-Cheap-Yellow-Display/main/Examples/Projects/TetrisWithNunchuck/TetrisWithNunchuck.ino).
+
+Also sad: Including _ESP Async WebServer_ leads to "DRAM segment data does not fit. Region `dram0_0_seg' overflowed by 11768 bytes". It seams it won't be possible to have a webserver in addition to the emulator.
+
+It helps to dynamically allocate the emulator.

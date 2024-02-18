@@ -3,4 +3,5 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
-fs/chip8/*.ch8
+fs/ch8toec8
+credentials.h

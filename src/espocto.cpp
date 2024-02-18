@@ -1,6 +1,7 @@
 /**
  * Play CHIP-8 ROMs on an esp32-2432s024c
  */ 
+#include "credentials.h"
 #include <string.h>
 
 #define SD_CS 5 
@@ -20,6 +21,10 @@
 #ifdef TARGET_ESP32
 #include <SPI.h>
 #include <SD.h>
+
+#include <WiFi.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
 
 #include "CST820.h"
 
@@ -118,23 +123,16 @@ CST820 touch(I2C_SDA, I2C_SCL, TP_RST, TP_INT);
 #include "console.h"
 #include "octo_emulator.h"
 
-struct prgInfo_t {
-  char* name;
-  int tickrate;
-  char* fillColor;
-  char* backgroundColor;
-  char* buzzColor;
-  char* quietColor;
-  bool shiftQuirks;
-  bool loadStoreQuirks;
-};
+//AsyncWebServer server(80);
+AsyncWebServer* server;
+const char* ssid = WLAN_SSID;
+const char* password = WLAN_PASS;
 
-prgInfo_t* prg;
+char** prg;
 int prgCount = 0;
 int prgSpace = 0;
-int currPrg = 55; // octojam1title.ch8
+int currPrg = 52; // octojam1title.ch8
 
-char* ch8 = NULL;
 int ch8Size;
 
 bool isMonitor = false;
@@ -175,8 +173,7 @@ unsigned long millis() {
 }
 #endif
 
-octo_emulator emu;
-octo_options options;
+octo_emulator* emu;
 
 const std::int8_t KEY_NONE = -1;
 
@@ -229,117 +226,119 @@ void drawButtons(void) {
   }
 }
 
-void showCurrPrg() {
+void showCurrPrg(octo_emulator* emu) {
   lcd.fillRect(0, 0, 240, 18, 0xFFFFCC00u);
 
   lcd.setTextColor(0xFF996600u, 0xFFFFCC00u);
-  lcd.drawNumber(options.tickrate, 2, 0, &fonts::FreeMonoBold9pt7b);
-  lcd.drawCenterString(prg[currPrg].name, 120, 0, &fonts::FreeMonoBold9pt7b);
+  lcd.drawNumber(emu->options.tickrate, 2, 0, &fonts::FreeMonoBold9pt7b);
+  char* p = strrchr(prg[currPrg], '.');
+  *p = '\0';
+  lcd.drawCenterString(prg[currPrg], 120, 0, &fonts::FreeMonoBold9pt7b);
+  *p = '.';
   lcd.setTextColor(0xFFFFCC00u, 0xFF996600u);
 }
 
-void loadCurrPrg() {
-  // 12 = "/chip8/" + ".ch8" + '\0'
-  char* path = (char*) malloc(12 + strlen(prg[currPrg].name));
+bool loadPrg(char* filename, octo_emulator* emu) {
 #ifdef TARGET_ESP32
-  strcpy(path, "/chip8/");
-#else
-  strcpy(path, "chip8/");
-#endif
-  strcat(path, prg[currPrg].name);
-  strcat(path, ".ch8");
-#ifdef TARGET_ESP32
-  File f = SD.open(path);
-  ch8Size = f.size();
-#else
-  FILE* f = fopen(path, "r");
-  fseek(f, 0, SEEK_END);
-  ch8Size = ftell(f);
-  rewind(f); 
-#endif
-  if (ch8) {
-    ch8 = (char*)realloc(ch8, ch8Size);
+  File f = SD.open(filename);
+  if (!f) {
+    return false;
   }
-  else {
-    ch8 = (char*)malloc(ch8Size);
-  }
-#ifdef TARGET_ESP32
-  f.read((uint8_t*)ch8, ch8Size);
+  int size = f.size();
+  char* info = (char*)malloc(size);
+  f.read((uint8_t*)info, size);
   f.close();
 #else
-  fread(ch8, ch8Size, 1, f);
+  FILE* f = fopen(filename, "r");
+  if (!f) {
+    return false;
+  }
+  fseek(f, 0, SEEK_END);
+  int size = ftell(f);
+  rewind(f);
+  char* info = (char*)malloc(size);
+  fread(info, size, 1, f);
   fclose(f);
 #endif
-  free(path);
-
-  octo_default_options(&options);
-  options.tickrate = prg[currPrg].tickrate;
-  options.q_shift = prg[currPrg].shiftQuirks;
-  options.q_loadstore = prg[currPrg].loadStoreQuirks;
-  octo_emulator_init(&emu, ch8, ch8Size, &options, NULL);
+  ch8Size = size - sizeof(octo_options);
+  octo_emulator_init(emu, info + sizeof(octo_options), ch8Size, (octo_options*)info, NULL);
+  free(info);
 
   monitorAddr = 0x200;
   monitorNibble = 0;
 
-  showCurrPrg();
+  showCurrPrg(emu);
+  return true;
 }
 
-void loadPrgInfo(void) {
+bool savePrg(char* filename, octo_emulator* emu) {
 #ifdef TARGET_ESP32
-  File f = SD.open("/chip8.txt");
-#else
-  FILE* f = fopen("chip8.txt", "r");
-#endif
+  File f = SD.open(filename, FILE_WRITE);
   if (!f) {
-    console_printf("Can't read info\r\n");
-    return;
+    return false;
   }
-#ifdef TARGET_ESP32
-  int size = f.size();
-#else
-  fseek(f, 0, SEEK_END);
-  int size = ftell(f);
-  rewind(f); 
-#endif
-  char* info = (char*)malloc(size + 1);
-#ifdef TARGET_ESP32
-  f.read((uint8_t*)info, size);
+  f.write((unsigned char*)&emu->options, sizeof(octo_options));
+  f.write(emu->ram, ch8Size);
   f.close();
 #else
-  fread(info, size, 1, f);
+  FILE* f = fopen(filename, "w");
+  if (!f) {
+    console_printf("Can't open %s\r\n", filename);
+    return false;
+  }
+  fwrite(emu->options, sizeof(octo_options), 1, f);
+  fwrite(emu->rom, ch8Size, 1, f);
   fclose(f);
 #endif
-  info[size] = '\0';
+  return true;
+}
 
-  prg = (prgInfo_t*)malloc(30 * sizeof(prgInfo_t));
+void loadCurrPrg(octo_emulator* emu) {
+  // 6 = "/ec8/" + '\0'
+  char* path = (char*) malloc(10 + strlen(prg[currPrg]));
+#ifdef TARGET_ESP32
+  strcpy(path, "/ec8/");
+#else
+  strcpy(path, "ec8/");
+#endif
+  strcat(path, prg[currPrg]);
+  if (loadPrg(path, emu)) {
+    console_printf("Loaded %s\r\n", path);
+  }
+  else {
+    console_printf("Failed to load %s\r\n", path);
+  }
+  free(path);
+}
+
+void loadPrgInfo() {
+#ifdef TARGET_ESP32
+  File d = SD.open("/ec8");
+
+  prg = (char**)malloc(30 * sizeof(char*));
   prgSpace = 30;
 
-  while (true) {
-    prgInfo_t prgInfo;
-
-    prgInfo.name = strtok(info, ",");
-    info = NULL;
-    if (!prgInfo.name) {
-      break;
+  File f = d.openNextFile();
+  while (f) {
+    const char* name = f.name();
+    if (strcmp(name + strlen(name) - 4, ".ec8") != 0) {
+      continue;
     }
-    prgInfo.tickrate = atoi(strtok(NULL, ","));
-    prgInfo.fillColor = strtok(NULL, ",");
-    prgInfo.backgroundColor = strtok(NULL, ",");
-    prgInfo.buzzColor = strtok(NULL, ",");
-    prgInfo.quietColor = strtok(NULL, ",");
-    char* s = strtok(NULL, ",");
-    prgInfo.shiftQuirks = s[0] == 1;
-    s = strtok(NULL, "\n");
-    prgInfo.loadStoreQuirks = s[0] == 1;
 
     if (prgSpace < ++prgCount) {
       prgSpace += 30;
       //console_printf("cnt=%d. More space -> %d\r\n", prgCount, prgSpace);
-      prg = (prgInfo_t*)realloc(prg, prgSpace * sizeof(prgInfo_t));
+      prg = (char**)realloc(prg, prgSpace * sizeof(char*));
     }
     //console_printf("%d: %s\r\n", prgCount -1, prgInfo.name);
-    memcpy(&prg[prgCount - 1], &prgInfo, sizeof(prgInfo_t));
+
+    prg[prgCount - 1] = strdup(name);
+  
+    f = d.openNextFile();
   }
+#else
+  // ...
+#endif
   console_printf("%d files read.\r\n", prgCount);
 }
 
@@ -449,6 +448,202 @@ void audio_init(octo_emulator *emu) {
 #endif
 #endif
 
+void notFound(AsyncWebServerRequest* request) {
+  request->send(404, "text/plain", "Not found");
+}
+
+// HTML web page to handle 3 input fields (input1, input2, input3)
+const char index_html[] PROGMEM = R"rawliteral(
+<!DOCTYPE HTML><html><head>
+  <meta charset="UTF-8">
+  <title>ESPocto</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  </head><body>
+  <h1>ESPocto</h1>
+  <form action="/save">
+    <p>Name<br><input type="text" name="name" value="%NAME%"></p>
+    <p>Code<br><textarea name="code" rows="10" cols="40">%CODE%</textarea></p>
+    <input type="submit" value="Save">
+  </form>
+</body></html>)rawliteral";
+
+
+char* instr(octo_emulator* emu, uint16_t addr) {
+  uint8_t hi = emu->ram[addr], lo = emu->ram[addr+1], op = hi >> 4;  
+  uint16_t wd = hi;
+  wd <<= 8; wd |= lo;
+  static char buf[13]; 
+  switch (op) {
+    case 0x0:
+      switch (wd) {
+        case 0x00E0:
+          return "cls";
+        case 0x00EE:
+          return "ret";
+        case 0x00FF:
+          return "hires";
+        case 0x00FE:
+          return "lores";
+        case 0x00FD:
+          return "exit";
+        case 0x00FB:
+          return "scr";
+        case 0x00FC:
+          return "scl";
+        default:
+          if (lo & 0xF0 == 0xC0) {
+            snprintf(buf, 8, "scd d %X", lo & 0x0F);
+          }
+          else {
+            buf[0] = '\0';
+          }
+          return buf;
+      }
+      break;
+    case 0x1:
+      snprintf(buf, 7, "jp %03X", wd & 0xFFF);
+      return buf;
+    case 0x2:
+      snprintf(buf, 9, "call %03X", wd & 0xFFF);
+      return buf;
+    case 0x3:
+      snprintf(buf, 9, "se v%X,%02X", hi & 0xF, lo);
+      return buf;
+    case 0x4:
+      snprintf(buf, 10, "sne v%X,%02X", hi & 0xF, lo);
+      return buf;
+    case 0x5:
+      snprintf(buf, 9, "se v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
+      return buf;
+    case 0x6:
+      snprintf(buf, 9, "ld v%X,%02X", hi & 0xF, lo);
+      return buf;
+    case 0x7:
+      snprintf(buf, 10, "add v%X,%02X", hi & 0xF, lo);
+      return buf;
+    case 0x8:
+      switch (lo & 0xF) {
+        case 0x0:
+          snprintf(buf, 9, "ld v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
+          return buf;
+        case 0x1:
+          snprintf(buf, 9, "or v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
+          return buf;
+        case 0x2:
+          snprintf(buf, 10, "and v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
+          return buf;
+        case 0x3:
+          snprintf(buf, 10, "xor v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
+          return buf;
+        case 0x4:
+          snprintf(buf, 10, "add v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
+          return buf;
+        case 0x5:
+          snprintf(buf, 10, "sub v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
+          return buf;
+        case 0x6:
+          snprintf(buf, 10, "shr v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
+          return buf;
+        case 0x7:
+          snprintf(buf, 11, "subn v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
+          return buf;
+        case 0xE:
+          snprintf(buf, 10, "shl v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
+          return buf;
+        default: 
+          buf[0] = '\0';
+          return buf;
+      }
+    case 0x9:
+      snprintf(buf, 10, "sne v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
+      return buf;
+    case 0xa:
+      snprintf(buf, 9, "ld i %03X", wd & 0xFFF);
+      return buf;
+    case 0xb:
+      snprintf(buf, 9, "jp v0,%03X", wd & 0xFFF);
+      return buf;
+    case 0xc:
+      snprintf(buf, 9, "rnd v%X,%02X", hi & 0xF, lo);
+      return buf;
+    case 0xd:
+      snprintf(buf, 12, "drw v%X,v%X,%X", hi & 0xF, lo >> 4, lo & 0xF);
+      return buf;
+    case 0xe:
+      switch (lo) {
+        case 0x9E:
+          snprintf(buf, 7, "skp v%X", hi & 0xF);
+          return buf;
+        case 0xA1:
+          snprintf(buf, 8, "sknp v%X", hi & 0xF);
+          return buf;
+        default: 
+          buf[0] = '\0';
+          return buf;
+      }
+    case 0xf:
+      switch (lo) {
+        case 0x07:
+          snprintf(buf, 9, "ld v%X,dt", hi & 0xF);
+          return buf;
+        case 0x0A:
+          snprintf(buf, 8, "ld v%X,k", hi & 0xF);
+          return buf;
+        case 0x15:
+          snprintf(buf, 9, "ld dt,v%X", hi & 0xF);
+          return buf;
+        case 0x18:
+          snprintf(buf, 9, "ld st,v%X", hi & 0xF);
+          return buf;
+        case 0x1E:
+          snprintf(buf, 9, "add i,v%X", hi & 0xF);
+          return buf;
+        case 0x29:
+          snprintf(buf, 8, "ld f,v%X", hi & 0xF);
+          return buf;
+        case 0x33:
+          snprintf(buf, 8, "ld b,v%X", hi & 0xF);
+          return buf;
+        case 0x55:
+          snprintf(buf, 10, "ld [i],v%X", hi & 0xF);
+          return buf;
+        case 0x65:
+          snprintf(buf, 10, "ld v%X,[i]", hi & 0xF);
+          return buf;
+        default: 
+          buf[0] = '\0';
+          return buf;
+      }
+    default: 
+      buf[0] = '\0';
+      return buf;
+  }
+}
+
+String webInfo(const String& var) {
+  if (var == "NAME") {
+    char* p = strrchr(prg[currPrg], '.');
+    *p = '\0';
+    String name(prg[currPrg]);
+    *p = '.';
+    return name;
+  }
+  else
+  if (var == "CODE") {
+    char line[26];
+    String buffer;
+    uint16_t addr;
+    for (addr = 0x200; addr < ch8Size + 0x200; addr += 2) {
+      snprintf(line, 24, "%04X: %02X%02X %s\n", addr,
+        emu->ram[addr], emu->ram[addr+1],
+        instr(emu, addr));
+      buffer += line;
+    }
+    return buffer;
+  }
+  return String();
+}
+
 void setup(void)
 {
 #ifdef TARGET_ESP32
@@ -476,11 +671,30 @@ void setup(void)
   lcd.fillScreen(0xFF000000u);
   lcd.setFont(&fonts::FreeMonoBold12pt7b);
 
+  emu = (octo_emulator*)calloc(1, sizeof(octo_emulator));
+
 #if TARGET_NATIVE
-  audio_init(&emu);
+  audio_init(emu);
 #endif
 
-  loadCurrPrg();
+#ifdef TARGET_ESP32
+  console_printf("Connecting...\r\n");
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  if (WiFi.waitForConnectResult() != WL_CONNECTED) {
+    console_printf("WiFi failed!\r\n");
+    return;
+  }
+  server = new AsyncWebServer(80);
+  console_printf("IP Address: %s\r\n", WiFi.localIP().toString().c_str());
+  server->on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send_P(200, "text/html", index_html, webInfo);
+  });
+  server->onNotFound(notFound);
+  server->begin();
+#endif
+
+  loadCurrPrg(emu);
   drawButtons();
 
   page = PAGE_MAIN;
@@ -544,158 +758,6 @@ void emu_step(octo_emulator* emu) {
   if (emu->st>0) emu->st--, emu->had_sound=1;
 }
 
-char* instr(octo_emulator* emu, uint16_t addr) {
-  uint8_t hi = emu->ram[addr], lo = emu->ram[addr+1], op = hi >> 4;  
-  uint16_t wd = hi;
-  wd <<= 8; wd |= lo;
-  static char buf[13]; 
-  switch (op) {
-    case 0x0:
-      switch (wd) {
-        case 0x00E0:
-          return "cls";
-        case 0x00EE:
-          return "ret";
-        case 0x00FF:
-          return "hires";
-        case 0x00FE:
-          return "lores";
-        case 0x00FD:
-          return "exit";
-        case 0x00FB:
-          return "scr";
-        case 0x00FC:
-          return "scl";
-        default:
-          if (lo & 0xF0 == 0xC0) {
-            snprintf(buf, 8, "scd d %X", lo & 0x0F);
-          }
-          else {
-            snprintf(buf, 5, "%04X", wd);
-          }
-          return buf;
-      }
-      break;
-    case 0x1:
-      snprintf(buf, 7, "jp %03X", wd & 0xFFF);
-      return buf;
-    case 0x2:
-      snprintf(buf, 9, "call %03X", wd & 0xFFF);
-      return buf;
-    case 0x3:
-      snprintf(buf, 9, "se v%X,%02X", hi & 0xF, lo);
-      return buf;
-    case 0x4:
-      snprintf(buf, 10, "sne v%X,%02X", hi & 0xF, lo);
-      return buf;
-    case 0x5:
-      snprintf(buf, 9, "se v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
-      return buf;
-    case 0x6:
-      snprintf(buf, 9, "ld v%X,%02X", hi & 0xF, lo);
-      return buf;
-    case 0x7:
-      snprintf(buf, 10, "add v%X,%02X", hi & 0xF, lo);
-      return buf;
-    case 0x8:
-      switch (lo & 0xF) {
-        case 0x0:
-          snprintf(buf, 9, "ld v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
-          return buf;
-        case 0x1:
-          snprintf(buf, 9, "or v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
-          return buf;
-        case 0x2:
-          snprintf(buf, 10, "and v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
-          return buf;
-        case 0x3:
-          snprintf(buf, 10, "xor v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
-          return buf;
-        case 0x4:
-          snprintf(buf, 10, "add v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
-          return buf;
-        case 0x5:
-          snprintf(buf, 10, "sub v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
-          return buf;
-        case 0x6:
-          snprintf(buf, 10, "shr v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
-          return buf;
-        case 0x7:
-          snprintf(buf, 11, "subn v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
-          return buf;
-        case 0xE:
-          snprintf(buf, 10, "shl v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
-          return buf;
-        default: 
-          snprintf(buf, 5, "%04X", wd);
-          return buf;
-      }
-    case 0x9:
-      snprintf(buf, 10, "sne v%X,v%X", hi & 0xF, lo & 0xF0 >> 4);
-      return buf;
-    case 0xa:
-      snprintf(buf, 9, "ld i %03X", wd & 0xFFF);
-      return buf;
-    case 0xb:
-      snprintf(buf, 9, "jp v0,%03X", wd & 0xFFF);
-      return buf;
-    case 0xc:
-      snprintf(buf, 9, "rnd v%X,%02X", hi & 0xF, lo);
-      return buf;
-    case 0xd:
-      snprintf(buf, 12, "drw v%X,v%X,%X", hi & 0xF, lo >> 4, lo & 0xF);
-      return buf;
-    case 0xe:
-      switch (lo) {
-        case 0x9E:
-          snprintf(buf, 7, "skp v%X", hi & 0xF);
-          return buf;
-        case 0xA1:
-          snprintf(buf, 7, "sknp v%X", hi & 0xF);
-          return buf;
-        default: 
-          snprintf(buf, 5, "%04X", wd);
-          return buf;
-      }
-    case 0xf:
-      switch (lo) {
-        case 0x07:
-          snprintf(buf, 9, "ld v%X,dt", hi & 0xF);
-          return buf;
-        case 0x0A:
-          snprintf(buf, 8, "ld v%X,k", hi & 0xF);
-          return buf;
-        case 0x15:
-          snprintf(buf, 9, "ld dt,v%X", hi & 0xF);
-          return buf;
-        case 0x18:
-          snprintf(buf, 9, "ld st,v%X", hi & 0xF);
-          return buf;
-        case 0x1E:
-          snprintf(buf, 9, "add i,v%X", hi & 0xF);
-          return buf;
-        case 0x29:
-          snprintf(buf, 8, "ld f,v%X", hi & 0xF);
-          return buf;
-        case 0x33:
-          snprintf(buf, 8, "ld b,v%X", hi & 0xF);
-          return buf;
-        case 0x55:
-          snprintf(buf, 10, "ld [i],v%X", hi & 0xF);
-          return buf;
-        case 0x65:
-          snprintf(buf, 10, "ld v%X,[i]", hi & 0xF);
-          return buf;
-        default: 
-          snprintf(buf, 5, "%04X", wd);
-          return buf;
-      }
-    default: 
-      snprintf(buf, 5, "%04X", wd);
-      return buf;
-  }
-}
-
 void showMonitor(octo_emulator* emu) {
   lcd.fillRect(0, 20, 240, 108, 0xFF996600u);
 
@@ -724,6 +786,7 @@ void showMonitor(octo_emulator* emu) {
   }
 }
 
+#if 0
 void showSavePage(void) {
   static LGFX_Button buttons[40];
   LGFX_Button* btn;
@@ -731,7 +794,7 @@ void showSavePage(void) {
   int x, w;
 
   lcd.fillScreen(0xFF996600u);
-  showCurrPrg();
+  showCurrPrg(&emu);
 
   for (int row = 0; row < 8; row++) {
     for (int col = 0; col < 5; col++) {
@@ -788,8 +851,9 @@ void showSavePage(void) {
   }
   page = PAGE_SAVE;
 }
+#endif
 
-void handleTouchMain(int touchX, int touchY) {
+void handleTouchMain(octo_emulator* emu, int touchX, int touchY) {
   for (int i = 0; i < 20; i++) {
     if (btn[i].contains(touchX, touchY)) {
       btn[i].press(true);
@@ -813,7 +877,7 @@ void handleTouchMain(int touchX, int touchY) {
             if (monitorAddr >= 0x202) {
               monitorAddr -= 2;
               monitorNibble = 0;
-              showMonitor(&emu);
+              showMonitor(emu);
             }
           }
           else
@@ -821,13 +885,13 @@ void handleTouchMain(int touchX, int touchY) {
             if (monitorAddr < 4 * 1024 - 2) {
               monitorAddr += 2;
               monitorNibble = 0;
-              showMonitor(&emu);
+              showMonitor(emu);
             }
           }
           else
           if (b == KEY_GO) {
             console_printf("Saving...\r\n");
-            showSavePage();
+            //showSavePage();
           }
           else
           if (b == KEY_MONITOR) {
@@ -835,7 +899,7 @@ void handleTouchMain(int touchX, int touchY) {
             lcd.fillRect(0, 15, 240, 102, 0xFF996600u);
           }
           else {
-            uint8_t* m = &emu.ram[monitorAddr];
+            uint8_t* m = &emu->ram[monitorAddr];
             switch (monitorNibble) {
               case 0:
                 *m = (*m & 0xF) | (b << 4);
@@ -855,7 +919,7 @@ void handleTouchMain(int touchX, int touchY) {
               monitorNibble = 0;
               monitorAddr += 2;
             }
-            showMonitor(&emu);
+            showMonitor(emu);
           }
         }
         else {
@@ -863,35 +927,35 @@ void handleTouchMain(int touchX, int touchY) {
           if (b == KEY_LEFT) {
             if (currPrg > 0) {
               currPrg -= 1;
-              showCurrPrg();
+              showCurrPrg(emu);
             }
           }
           else
           if (b == KEY_RIGHT) {
             if (currPrg < prgCount - 1) {
               currPrg += 1;
-              showCurrPrg();
+              showCurrPrg(emu);
             }
           }
           else
           if (b == KEY_GO) {
-            loadCurrPrg();
+            loadCurrPrg(emu);
           }
           else
           if (b == KEY_MONITOR) {
             isMonitor = true;
-            showMonitor(&emu);
+            showMonitor(emu);
           }
         }
       }
       if (b >= 0) {
-        emu.keys[b] = true;
+        emu->keys[b] = true;
       }
     }
   }
 }
 
-void handleUntouchMain() {
+void handleUntouchMain(octo_emulator* emu) {
   for (int i = 0; i < 20; i++) {
     if (btn[i].isPressed()) {
       btn[i].press(false);
@@ -899,17 +963,17 @@ void handleUntouchMain() {
 
       std::int8_t b = hexButton(i);
       if (b >= 0) {
-        emu.keys[b] = false;
+        emu->keys[b] = false;
       }
       lcd.fillRect(228, 0, 10, 18, 0xFFFFCC00u);
     }
   }
 }
 
-void handleTouchSave(int touchX, int touchY) {
+void handleTouchSave(octo_emulator* emu, int touchX, int touchY) {
 }
 
-void handleUntouchSave() {
+void handleUntouchSave(octo_emulator* emu) {
 }
 
 unsigned long previousMillis = 0; // will store last time the function was called
@@ -945,24 +1009,24 @@ void loop(void)
 
       switch (page) {
         case PAGE_MAIN:
-          handleTouchMain(touchX, touchY);
+          handleTouchMain(emu, touchX, touchY);
         case PAGE_SAVE:
-          handleTouchSave(touchX, touchY);
+          handleTouchSave(emu, touchX, touchY);
       }
     }
     else {
       // not touched
       switch (page) {
         case PAGE_MAIN:
-          handleUntouchMain();
+          handleUntouchMain(emu);
         case PAGE_SAVE:
-          handleUntouchSave();
+          handleUntouchSave(emu);
       }
     }
 
     if (page == PAGE_MAIN && !isMonitor) { 
-      emu_step(&emu);
-      ui_run(&emu);
+      emu_step(emu);
+      ui_run(emu);
     }
   }
 }

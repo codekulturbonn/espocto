@@ -1,11 +1,14 @@
 # Make filesystem
 
+AT=../../vendor/chip8-test-rom-with-audio
+
 fs::
-	cp chip8Archive/roms/*.ch8 chip8
-	python3 ./roms.py
-	cp ../vendor/chip8-test-rom-with-audio/*.ch8 chip8
-	echo "test_opcode,7,#FFAA00,#AA4400,#FFAA00,#000000,0,0" >> chip8.txt
-	echo "chip8-test-rom-with-audio,7,#FFAA00,#AA4400,#FFAA00,#000000,0,0" >> chip8.txt
+	(cd ec8; python3 ../roms.py)
+	(cd ec8; ../ch8toec8 $(AT)/test_opcode.ch8 0 0)
+	(cd ec8; ../ch8toec8 $(AT)/chip8-test-rom-with-audio.ch8 0 0)
 
 run::
 	../.pio/build/native/program
+
+ch8toec8: ch8toec8.c
+	$(CC) -o ch8toec8 ch8toec8.c
