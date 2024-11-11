@@ -123,10 +123,12 @@ CST820 touch(I2C_SDA, I2C_SCL, TP_RST, TP_INT);
 #include "console.h"
 #include "octo_emulator.h"
 
+#ifdef TARGET_ESP32
 //AsyncWebServer server(80);
 AsyncWebServer* server;
 const char* ssid = WLAN_SSID;
 const char* password = WLAN_PASS;
+#endif
 
 char** prg;
 int prgCount = 0;
@@ -286,8 +288,8 @@ bool savePrg(char* filename, octo_emulator* emu) {
     console_printf("Can't open %s\r\n", filename);
     return false;
   }
-  fwrite(emu->options, sizeof(octo_options), 1, f);
-  fwrite(emu->rom, ch8Size, 1, f);
+  fwrite((unsigned char*)&emu->options, sizeof(octo_options), 1, f);
+  fwrite(emu->ram, ch8Size, 1, f);
   fclose(f);
 #endif
   return true;
@@ -448,6 +450,7 @@ void audio_init(octo_emulator *emu) {
 #endif
 #endif
 
+#ifdef TARGET_ESP32
 void notFound(AsyncWebServerRequest* request) {
   request->send(404, "text/plain", "Not found");
 }
@@ -466,7 +469,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     <input type="submit" value="Save">
   </form>
 </body></html>)rawliteral";
-
+#endif
 
 char* instr(octo_emulator* emu, uint16_t addr) {
   uint8_t hi = emu->ram[addr], lo = emu->ram[addr+1], op = hi >> 4;  
@@ -620,6 +623,7 @@ char* instr(octo_emulator* emu, uint16_t addr) {
   }
 }
 
+#ifdef TARGET_ESP32
 String webInfo(const String& var) {
   if (var == "NAME") {
     char* p = strrchr(prg[currPrg], '.');
@@ -643,6 +647,7 @@ String webInfo(const String& var) {
   }
   return String();
 }
+#endif
 
 void setup(void)
 {
