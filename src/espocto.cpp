@@ -646,17 +646,6 @@ String webInfo(const String& var) {
 
 void setup(void)
 {
-#ifdef TARGET_ESP32
-  Serial.begin(115200);
-
-  if (!SD.begin(SD_CS)) {
-    console_printf("SD.begin failed!\r\n");
-    while (1) delay(0);
-  }
-#endif
-
-  loadPrgInfo();
-
   lcd.init();
 #ifdef TARGET_ESP32
   lcd.setRotation(2);
@@ -670,6 +659,18 @@ void setup(void)
   lcd.setColorDepth(16);
   lcd.fillScreen(0xFF000000u);
   lcd.setFont(&fonts::FreeMonoBold12pt7b);
+
+#ifdef TARGET_ESP32
+  Serial.begin(115200);
+
+  if (!SD.begin(SD_CS)) {
+    console_printf("SD.begin failed!\r\n");
+    lcd.drawString("Please insert SD card", 0, 0, &fonts::FreeMonoBold12pt7b);
+    while (1) delay(0);
+  }
+#endif
+
+  loadPrgInfo();
 
   emu = (octo_emulator*)calloc(1, sizeof(octo_emulator));
 
