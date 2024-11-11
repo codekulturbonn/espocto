@@ -24,3 +24,7 @@ New plan:
 Sadly, I could not get neither of my Nunchuks to work.
 
 A small web server allows to edit the program name and disassembled code. Saving is W.I.P.
+
+## 2024-11-11
+
+Moved the SDcard check below the display init.

@@ -666,7 +666,8 @@ void setup(void)
   while (!SD.begin(SD_CS)) {
     console_printf("SD.begin failed!\r\n");
     lcd.drawString("Insert SD card", 0, 0, &fonts::FreeMonoBold12pt7b);
-    delay(500);  }
+    delay(500);
+  }
 #endif
 
   lcd.fillScreen(0xFF000000u);
