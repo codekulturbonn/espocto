@@ -663,12 +663,13 @@ void setup(void)
 #ifdef TARGET_ESP32
   Serial.begin(115200);
 
-  if (!SD.begin(SD_CS)) {
+  while (!SD.begin(SD_CS)) {
     console_printf("SD.begin failed!\r\n");
-    lcd.drawString("Please insert SD card", 0, 0, &fonts::FreeMonoBold12pt7b);
-    while (1) delay(0);
-  }
+    lcd.drawString("Insert SD card", 0, 0, &fonts::FreeMonoBold12pt7b);
+    delay(500);  }
 #endif
+
+  lcd.fillScreen(0xFF000000u);
 
   loadPrgInfo();
 
