@@ -24,7 +24,9 @@ The touch interface is a CST820, connected with I2C. This is not supported by Lo
 
 ## Games
 
-There are ~100 games from [the CHIP-8 archive](https://johnearnest.github.io/chip8Archive/) in "vendor/chip8Archive/roms". Put them in an SDcard in directory "/chip8". Also, put file "chip8.txt" in the root directory of this SDcard. This file is created from "chip8Archive/programs.json" with a small Python script.
+There are ~100 games from [the CHIP-8 archive](https://johnearnest.github.io/chip8Archive/) in "vendor/chip8Archive/roms". 
+
+The emulator needs the files to be in a special format, which is created by running `make fs`. Put the folder `ec8` with the ROMs *.ec8 (or the contents of file `ec8.zip` in the release) in the root of your SDcard.
 
 ## The Board
 
